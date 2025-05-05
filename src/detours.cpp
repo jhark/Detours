@@ -51,6 +51,26 @@ C_ASSERT(sizeof(_DETOUR_ALIGN) == 1);
 
 //////////////////////////////////////////////////////////////////////////////
 //
+// Helpers for writing code bytes while avoiding misaligned access.
+//
+// C.f. code like: *((INT32*&)pbCode)++ = (INT32)((PBYTE)ppbJmpVal);
+//
+#define WRITE_CODE(TYPE, DST, EXPR) \
+    do { \
+        TYPE const codeWriteVal__ = (TYPE)(EXPR); \
+        memcpy((DST), &codeWriteVal__, sizeof(TYPE)); \
+        DST += sizeof(TYPE); \
+    } while (false)
+
+#define COPY_CODE(TYPE, DST, SRC) \
+    do { \
+        memcpy((DST), (SRC), sizeof(TYPE)); \
+        DST += sizeof(TYPE); \
+        SRC += sizeof(TYPE); \
+    } while (false)
+
+//////////////////////////////////////////////////////////////////////////////
+//
 // Region reserved for system DLLs, which cannot be used for trampolines.
 //
 static PVOID    s_pSystemRegionLowerBound   = (PVOID)(ULONG_PTR)0x70000000;
@@ -134,7 +154,7 @@ inline PBYTE detour_gen_jmp_immediate(PBYTE pbCode, PBYTE pbJmpVal)
 {
     PBYTE pbJmpSrc = pbCode + 5;
     *pbCode++ = 0xE9;   // jmp +imm32
-    *((INT32*&)pbCode)++ = (INT32)(pbJmpVal - pbJmpSrc);
+    WRITE_CODE(INT32, pbCode, pbJmpVal - pbJmpSrc);
     return pbCode;
 }
 
@@ -142,7 +162,7 @@ inline PBYTE detour_gen_jmp_indirect(PBYTE pbCode, PBYTE *ppbJmpVal)
 {
     *pbCode++ = 0xff;   // jmp [+imm32]
     *pbCode++ = 0x25;
-    *((INT32*&)pbCode)++ = (INT32)((PBYTE)ppbJmpVal);
+    WRITE_CODE(INT32, pbCode, (PBYTE)ppbJmpVal);
     return pbCode;
 }
 
@@ -366,7 +386,7 @@ inline PBYTE detour_gen_jmp_immediate(PBYTE pbCode, PBYTE pbJmpVal)
 {
     PBYTE pbJmpSrc = pbCode + 5;
     *pbCode++ = 0xE9;   // jmp +imm32
-    *((INT32*&)pbCode)++ = (INT32)(pbJmpVal - pbJmpSrc);
+    WRITE_CODE(INT32, pbCode, pbJmpVal - pbJmpSrc);
     return pbCode;
 }
 
@@ -375,7 +395,7 @@ inline PBYTE detour_gen_jmp_indirect(PBYTE pbCode, PBYTE *ppbJmpVal)
     PBYTE pbJmpSrc = pbCode + 6;
     *pbCode++ = 0xff;   // jmp [+imm32]
     *pbCode++ = 0x25;
-    *((INT32*&)pbCode)++ = (INT32)((PBYTE)ppbJmpVal - pbJmpSrc);
+    WRITE_CODE(INT32, pbCode, (PBYTE)ppbJmpVal - pbJmpSrc);
     return pbCode;
 }
 
@@ -795,9 +815,9 @@ inline ULONG fetch_thumb_opcode(PBYTE pbCode)
 inline void write_thumb_opcode(PBYTE &pbCode, ULONG Opcode)
 {
     if (Opcode >= 0x10000) {
-        *((UINT16*&)pbCode)++ = Opcode >> 16;
+        WRITE_CODE(UINT16, pbCode, (UINT16)(Opcode >> 16));
     }
-    *((UINT16*&)pbCode)++ = (UINT16)Opcode;
+    WRITE_CODE(UINT16, pbCode, (UINT16)Opcode);
 }
 
 PBYTE detour_gen_jmp_immediate(PBYTE pbCode, PBYTE *ppPool, PBYTE pbJmpVal)
@@ -2241,9 +2261,9 @@ LONG WINAPI DetourAttachEx(_Inout_ PVOID *ppPointer,
         if (op == 0xbf00) {
             op = fetch_thumb_opcode(pbSrc + 2);
             if (op == 0xf8dff000) { // LDR PC,[PC]
-                *((PUSHORT&)pbTrampoline)++ = *((PUSHORT&)pbSrc)++;
-                *((PULONG&)pbTrampoline)++ = *((PULONG&)pbSrc)++;
-                *((PULONG&)pbTrampoline)++ = *((PULONG&)pbSrc)++;
+                COPY_CODE(PUSHORT, pbTrampoline, pbSrc);
+                COPY_CODE(PULONG, pbTrampoline, pbSrc);
+                COPY_CODE(PULONG, pbTrampoline, pbSrc);
                 cbTarget = (LONG)(pbSrc - pbTarget);
                 // We will fall through the "while" because cbTarget is now >= cbJump.
             }
@@ -2252,8 +2272,8 @@ LONG WINAPI DetourAttachEx(_Inout_ PVOID *ppPointer,
     else {
         ULONG op = fetch_thumb_opcode(pbSrc);
         if (op == 0xf8dff000) { // LDR PC,[PC]
-            *((PULONG&)pbTrampoline)++ = *((PULONG&)pbSrc)++;
-            *((PULONG&)pbTrampoline)++ = *((PULONG&)pbSrc)++;
+            COPY_CODE(PULONG, pbTrampoline, pbSrc);
+            COPY_CODE(PULONG, pbTrampoline, pbSrc);
             cbTarget = (LONG)(pbSrc - pbTarget);
             // We will fall through the "while" because cbTarget is now >= cbJump.
         }
